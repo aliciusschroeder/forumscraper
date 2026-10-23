@@ -3,6 +3,7 @@ import sys
 from .defs import reliq, Outputs, __version__
 from .extractors.extractor import *
 from .args import argparser, request_settings
+from .session import Session
 
 __all__ = [
     "Outputs",
@@ -25,7 +26,15 @@ __all__ = [
 
 
 def main():
-    args = argparser().parse_args(sys.argv[1:] if sys.argv[1:] else ["-h"])
+    parser = argparser()
+    args = parser.parse_args(sys.argv[1:] if sys.argv[1:] else ["-h"])
+
+    if args.open_browser:
+        if not hasattr(args, "user_data_dir"):
+            parser.error("--open-browser requires --user-data-dir")
+        session = Session(**request_settings(args))
+        session.open_browser([i for i in args.urls if isinstance(i, str)])
+        return
 
     output = args.names | Outputs.threads
 

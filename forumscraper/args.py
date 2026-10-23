@@ -171,6 +171,8 @@ def request_settings(args):
         "user_data_dir",
         "headless",
         "sandbox",
+        "new_window",
+        "rotate_focus",
     ]
     ret = {i: getattr(args, i) for i in names if hasattr(args, i)}
 
@@ -339,6 +341,25 @@ def args_section(parser):
         action="store_false",
         help="Disable sandbox of the browser, may be needed in containers",
         default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--tabs",
+        dest="new_window",
+        action="store_false",
+        help="Open threads in tabs of one window instead of each in its own window. Pages in tabs that aren't in front are throttled by the browser, which may keep them from passing challenges, see --rotate-focus",
+        default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--rotate-focus",
+        metavar="TIME",
+        type=valid_time,
+        help="Bring the next tab to front every TIME, so that pages in all of them get to run",
+        default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Only open the browser with its window and URLs, started the same way as for scraping, e.g. to log in to forums with profile from --user-data-dir, and wait until it's closed",
     )
 
     return request

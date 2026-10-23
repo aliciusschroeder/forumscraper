@@ -14,6 +14,7 @@ from urllib.parse import urldefrag
 import zendriver
 from zendriver import cdp
 from zendriver.core.connection import ProtocolException
+from zendriver.core.proxy import ProxyForwarder, UpstreamProxy
 
 from .defs import reliq
 from .utils import smarttrim
@@ -162,6 +163,8 @@ class Session:
             "browser_args": [],
             "user_data_dir": None,
             "sandbox": True,
+            "new_window": True,
+            "rotate_focus": None,
         }
         self.headers = {}
         self.cookies = {}
@@ -173,8 +176,10 @@ class Session:
         self._loop = None
         self._thread = None
         self._browser = None
-        self._context = None
+        self._forwarder = None
+        self._rotator = None
         self._main = None
+        self._tabs = []
 
         self.set_settings(settings)
 
@@ -226,65 +231,112 @@ class Session:
             future.cancel()
             raise
 
-    async def _start(self):
+    async def _start(self, headless, rotate_focus):
         settings = self._settings
-        proxy = get_proxy(settings["proxies"])
-        browser = await zendriver.start(
-            headless=settings["headless"],
-            browser_executable_path=settings["browser_executable_path"],
-            browser_args=list(settings["browser_args"]),
-            user_data_dir=settings["user_data_dir"],
-            sandbox=settings["sandbox"],
-            user_agent=settings["user_agent"],
-        )
-        try:
-            if proxy is None:
-                page = browser.main_tab
-            else:
-                page = await browser.create_context(proxy_server=proxy)
-                self._context = page.browser_context_id
+        args = list(settings["browser_args"])
 
-            await browser.connection.send(
-                cdp.browser.set_download_behavior(
-                    "deny", browser_context_id=self._context
-                )
+        # set for the whole browser, since tabs of browser contexts with their
+        # own proxy don't use the profile, e.g. its logins
+        proxy = get_proxy(settings["proxies"])
+        if proxy is not None:
+            upstream = UpstreamProxy.from_url(proxy)
+            if upstream is not None:
+                # chrome can't pass proxy credentials by itself
+                self._forwarder = ProxyForwarder(upstream)
+                await self._forwarder.start()
+                proxy = self._forwarder.proxy_server
+            args.append("--proxy-server=" + proxy)
+
+        try:
+            browser = await zendriver.start(
+                headless=headless,
+                browser_executable_path=settings["browser_executable_path"],
+                browser_args=args,
+                user_data_dir=settings["user_data_dir"],
+                sandbox=settings["sandbox"],
+                user_agent=settings["user_agent"],
+                # starting with a new profile or a window can take longer than
+                # the default of 10 tries every 0.25s
+                browser_connection_max_tries=60,
             )
-            if settings["browser"] is not None:
-                await page.send(
-                    cdp.network.set_cookies(browser_cookies(settings["browser"]))
-                )
+            try:
+                page = browser.main_tab
+                await browser.connection.send(cdp.browser.set_download_behavior("deny"))
+                if settings["browser"] is not None:
+                    await page.send(
+                        cdp.network.set_cookies(browser_cookies(settings["browser"]))
+                    )
+            except BaseException:
+                await browser.stop()
+                raise
         except BaseException:
-            await browser.stop()
+            if self._forwarder is not None:
+                await self._forwarder.close()
+                self._forwarder = None
             raise
 
         self._browser = browser
-        return Tab(page)
+        main = Tab(page)
+        self._tabs = [main]
+        if rotate_focus:
+            self._rotator = asyncio.ensure_future(self._rotate_focus(rotate_focus))
+        return main
+
+    async def _stop(self):
+        if self._rotator is not None:
+            self._rotator.cancel()
+            self._rotator = None
+        with contextlib.suppress(Exception):
+            await self._browser.stop()
+        if self._forwarder is not None:
+            await self._forwarder.close()
+            self._forwarder = None
+        self._browser = None
+        self._tabs = []
+
+    async def _rotate_focus(self, interval):
+        i = 0
+        while True:
+            await asyncio.sleep(interval)
+            if len(self._tabs) < 2:
+                continue
+            i = (i + 1) % len(self._tabs)
+            # tabs are closed meanwhile
+            with contextlib.suppress(Exception):
+                await self._tabs[i].tab.activate()
 
     def _main_tab(self):
         with self._start_lock:
             if self._main is None:
-                self._main = self._run(self._start())
+                self._main = self._run(
+                    self._start(self["headless"], self["rotate_focus"])
+                )
                 atexit.register(self.close)
             return self._main
 
     async def _new_tab(self):
         browser = self._browser
         try:
-            # in its own window, since only the front tab of a window is visible
-            # and pages in the others are throttled, e.g. never pass challenges
+            # by default in its own window, since only the front tab of a window
+            # is visible and pages in the others are throttled, e.g. never pass
+            # challenges
             target_id = await browser.connection.send(
-                cdp.target.create_target(
-                    "about:blank", browser_context_id=self._context, new_window=True
-                )
+                cdp.target.create_target("about:blank", new_window=self["new_window"])
             )
             for _ in range(2):
                 for i in browser.tabs:
                     if i.target_id == target_id:
-                        return Tab(i)
+                        tab = Tab(i)
+                        self._tabs.append(tab)
+                        return tab
                 await browser.update_targets()
         except ProtocolException as e:
             raise RequestError("failed with {}".format(e.message.split("\n")[0]))
         raise RequestError("failed with missing tab")
+
+    async def _close_tab(self, tab):
+        self._tabs.remove(tab)
+        await tab.tab.close()
 
     @contextlib.contextmanager
     def tab(self):
@@ -304,7 +356,7 @@ class Session:
             if tab is not None:
                 # a tab that can't be closed belongs to a browser that's already gone
                 with contextlib.suppress(Exception):
-                    self._run(tab.tab.close())
+                    self._run(self._close_tab(tab))
 
     def _current_tab(self):
         main = self._main_tab()
@@ -507,19 +559,48 @@ class Session:
         r = resp.json()
         return (r, resp) if response else r
 
+    async def _wait_closed(self, urls):
+        browser = self._browser
+        # without waiting for pages, which may never load
+        for i, url in enumerate(urls):
+            if i == 0:
+                await self._main.tab.send(cdp.page.navigate(url))
+            else:
+                await browser.connection.send(cdp.target.create_target(url))
+
+        while True:
+            await asyncio.sleep(1)
+            try:
+                targets = await browser.connection.send(cdp.target.get_targets())
+            except Exception:
+                return  # browser exited
+            if not any(i.type_ == "page" for i in targets):
+                return
+
+    def open_browser(self, urls=()):
+        """
+        Opens the browser with its window and urls, set up as for requests,
+        e.g. to log in with user_data_dir, and waits until it's closed.
+        """
+        with self._start_lock:
+            if self._main is not None:
+                raise RuntimeError("browser is already started")
+            self._main = self._run(self._start(False, None))
+        try:
+            self._run(self._wait_closed(urls))
+        finally:
+            self.close()
+
     def close(self):
         """Stops the browser, next request starts a new one"""
         with self._start_lock:
             browser = self._browser
             loop = self._loop
-            self._browser = None
-            self._context = None
             self._main = None
             atexit.unregister(self.close)
 
             if browser is not None:
-                with contextlib.suppress(Exception):
-                    self._run(browser.stop())
+                self._run(self._stop())
 
             with self._lock:
                 self._loop = None

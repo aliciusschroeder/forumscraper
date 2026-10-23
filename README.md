@@ -119,6 +119,17 @@ The browser always follows redirections, `--location` makes it send headers also
 
 `--no-sandbox` disable sandbox of the browser, may be needed in containers.
 
+`--tabs` open threads in tabs of one window instead of each in its own window. The browser throttles pages in tabs that aren't in front, which may keep them from passing challenges.
+
+`--rotate-focus TIME` bring the next tab (or window) to front every `TIME`, so that pages in all of them get to run, e.g. `--tabs --rotate-focus 2`.
+
+`--open-browser` only open the browser with its window and `URL`s, started the same way as for scraping, and wait until it's closed. Use it with `--user-data-dir` to log in to forums once and scrape them as logged in user afterwards
+
+    forumscraper --user-data-dir ~/forums-profile --open-browser 'https://forum.example.com/login.php'
+    forumscraper --user-data-dir ~/forums-profile 'https://forum.example.com/'
+
+A profile can be used by only one browser at a time.
+
 
 ### Settings
 
@@ -486,3 +497,9 @@ The following are used when the browser is started, i.e. they have to be set at 
 `user_data_dir=None` browser profile directory, by default a new temporary one is used.
 
 `sandbox=True` if set to `False` disable sandbox of the browser.
+
+`new_window=True` if set to `False` open threads in tabs of one window instead of each in its own window.
+
+`rotate_focus=None` number of seconds after which the next tab is brought to front.
+
+`ex.session.open_browser(urls)` opens the browser of a scraper with its window and `urls`, and waits until it's closed, e.g. to log in with `user_data_dir`.
