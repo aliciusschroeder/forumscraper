@@ -17,6 +17,10 @@ class vbulletin(ForumExtractor):
 
             self.match = [
                 (
+                    r"/([0-9]+)-[^/]*/page[0-9]+/?$",
+                    1,
+                ),
+                (
                     r"/([0-9]+)-[^/]*/?$",
                     1,
                 ),
@@ -27,6 +31,12 @@ class vbulletin(ForumExtractor):
             ]
             self.trim = True
 
+        def url_get_page(self, url):
+            r = re.search(r"[?&]page=([0-9]+)|/page([0-9]+)/?([?#]|$)", url)
+            if r is None:
+                return
+            return int(r[1] or r[2])
+
         def get_contents(self, rq, settings, state, url, i_id, path):
             ret = {"format_version": "vbulletin-3+-thread", "url": url, "id": int(i_id)}
 
@@ -34,10 +44,20 @@ class vbulletin(ForumExtractor):
             dict_add(ret, t)
 
             posts = []
+            first = self.url_get_page(url) or 1
+            pages = 0
 
             for rq in self.next(rq, settings, state, path):
                 t = rq.json(Path("vbulletin/posts.reliq"))
                 posts += t["posts"]
+                pages += 1
+
+            # allows to continue downloading the thread from where it stopped
+            ret["pages"] = {
+                "first": first,
+                "last": first + pages - 1,
+                "next": self.get_next(rq) or "",
+            }
 
             outposts = []
             for i in posts:

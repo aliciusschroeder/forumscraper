@@ -166,6 +166,9 @@ class ItemExtractor:
             if r is not None:
                 return r[1][i[1]]
 
+    def url_get_page(self, url):
+        pass
+
     def next(self, rq, settings, state, path, **kwargs):
         yield rq
 
@@ -190,7 +193,8 @@ class ItemExtractor:
             except AlreadyVisitedError:
                 break
 
-            write_html(path + "-" + str(page), rq, settings)
+            if path:
+                write_html(path + "-" + str(page), rq, settings)
 
             yield rq
 
@@ -214,7 +218,13 @@ class ItemExtractor:
                 if not rq:
                     return
 
-        path = item_file_check(url, self.path_format, i_id, settings)
+        name = i_id
+        page = self.url_get_page(url)
+        if page is not None and page > 1:
+            # so that it doesn't keep the item from being downloaded from the start
+            name = "{}-page{}".format(i_id, page)
+
+        path = item_file_check(url, self.path_format, name, settings)
 
         if not path and Outputs.data not in outtype:
             return state

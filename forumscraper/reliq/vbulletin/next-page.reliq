@@ -1,7 +1,8 @@
 {
     * ( .pagenav )( .threadpagenav )( .pagination )( #mb_pagenav ); {
-        [0] a rel=next | "%(href)v",
-        [0] a .js-pagenav-next-button href=b>http | "%(href)v",
+        [0] a rel=next | "%(href)v\n",
+        [0] a .js-pagenav-next-button href=b>http | "%(href)v\n",
     },
-    span .pages; [0] span .currentpage; [0] a ssub@ | "%(href)v"
-} / line [0] sed "/^javascript:/d; s/&amp;/\&/g"
+    span .pages; [0] span .currentpage; [0] a ssub@ | "%(href)v\n",
+    * .pagenav; [0] tr; [0] td child@ -has@"[0] a" has@"[0] strong"; [0] td ssub@; [0] a | "%(href)v\n"
+} / sed "/^javascript:/d; s/&amp;/\&/g" line [0] trim

@@ -412,23 +412,27 @@ class Session:
                 if response is None:
                     raise RequestError("failed with missing response")
 
+                text = ""
+                if request_id not in empty:
+                    body, base64_encoded = await page.send(
+                        cdp.network.get_response_body(request_id)
+                    )
+                    text = decode_body(body, base64_encoded, response.headers)
+
+                # pages of challenges are loaded again once they're passed
                 if header(response.headers, "cf-mitigated") == "challenge":
-                    # page is loaded again after the challenge is passed
                     challenged = True
                     if solver is None:
                         solver = asyncio.ensure_future(solve_challenge(page))
+                    continue
+                if 'id="anubis_challenge"' in text:
+                    challenged = True  # its proof of work is done by the page
                     continue
                 break
 
             if load.redirects > settings["max_redirects"]:
                 raise RequestError("failed with too_many_redirects")
 
-            text = ""
-            if request_id not in empty:
-                body, base64_encoded = await page.send(
-                    cdp.network.get_response_body(request_id)
-                )
-                text = decode_body(body, base64_encoded, response.headers)
             cookies = await page.send(cdp.network.get_cookies([response.url]))
 
             return Response(

@@ -41,6 +41,8 @@ Above behaviour is set by default `--names id`, and can be changed with `--names
 
     forumscraper --names hash --directory DIR URL
 
+vBulletin threads downloaded from a later page, e.g. `showthread.php?t=24&page=5`, are saved as `24-page5`. Their files have a `pages` field with numbers of the `first` and `last` downloaded page and url of the `next` one, from which downloading can be continued, e.g. after it was limited by `--thread-pages-max`.
+
 By default if files to be created are found and are not empty, function exits not overwriting them. This can be changed using `--force` option.
 
 forumscraper output logging information to `stdout` (can be changed with `--log FILE`) and information about failures to `stderr` (can be changed with `--failed FILE`)
