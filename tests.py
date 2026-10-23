@@ -10,7 +10,6 @@ import os
 import itertools
 import hashlib
 import json
-import vcr
 import forumscraper
 
 
@@ -617,8 +616,7 @@ def create_ex_boards(**kwargs):
 
 
 class tester:
-    def __init__(self, cassettedir, correctdir, tempdir):
-        self.cassettedir = os.path.realpath(cassettedir)
+    def __init__(self, correctdir, tempdir):
         self.correctdir = os.path.realpath(correctdir)
         self.tempdir = os.path.realpath(tempdir)
 
@@ -632,10 +630,7 @@ class tester:
         os.chdir(self.tempdir)
 
         for i in tests:
-            try:
-                self.test(i)
-            except vcr.errors.CannotOverwriteExistingCassetteException as e:
-                print(i[0], i[2], file=sys.stderr)
+            self.test(i)
 
         os.chdir(pwd)
 
@@ -653,11 +648,7 @@ class tester:
 
         with open("!stdout", "w") as out:
             with open("!stderr", "w") as err:
-                with vcr.use_cassette(
-                    self.cassettedir + "/" + dirname + "/" + dirname2,
-                    record_mode="none",  # none once all
-                ):
-                    func(url, out, err)
+                func(url, out, err)
 
         os.chdir(pwd2)
         self.prettify_json(dirname2)
@@ -673,7 +664,6 @@ class tester:
 
         try:
             os.mkdir(dirname)
-            os.mkdir(self.cassettedir + "/" + dirname)
         except Exception:
             pass
 
@@ -784,12 +774,13 @@ def testurl(create_ex, attr, print_func=None):
             },
         )
 
-        r = getattrs(ex, attr)
-        if r is None:
-            return r
-        r = r(url)
-        if print_func is not None:
-            print_func(r, out, err)
+        with ex:
+            r = getattrs(ex, attr)
+            if r is None:
+                return r
+            r = r(url)
+            if print_func is not None:
+                print_func(r, out, err)
 
     return func
 
@@ -856,6 +847,6 @@ def create_tests():
                     )
 
 
-t = tester("cassettes", "correct", "temp")
+t = tester("correct", "temp")
 
 t.run(create_tests())

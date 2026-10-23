@@ -6,6 +6,8 @@ forumscraper aims to be an universal, automatic and extensive scraper for forums
 
     pip install forumscraper
 
+All pages are loaded by a Chrome, Chromium or Brave browser driven with [zendriver](https://github.com/aliciusschroeder/zendriver), so one of them has to be installed. It's found automatically, otherwise its path can be set with `--browser-path`.
+
 # Supported forums
 
 - Invision Power Board (only 4.x and 5.x versions)
@@ -45,7 +47,7 @@ forumscraper output logging information to `stdout` (can be changed with `--log 
 
 Failures are generally ignored but setting `--pedantic` flag stops the execution if any failure is encountered.
 
-Download `URL`s into `DIR` using `8` threads and log failures into `failures.txt` (note that this option is specified before the `--directory` option, otherwise it would create it in the specified directory if relative path is used)
+Download `URL`s into `DIR` scraping `8` threads at once, each in its own browser tab, and log failures into `failures.txt` (note that this option is specified before the `--directory` option, otherwise it would create it in the specified directory if relative path is used)
 
     forumscraper  --failed failures.txt --threads 8 --directory DIR URL1 URL2 URL3
 
@@ -79,6 +81,8 @@ Get some help (you might discover that many options are abbreviated to single le
 
 ### Request options
 
+Every request loads a page in a tab of a headless browser, which also passes challenges of anti-bot protections like Cloudflare. Pages of forum threads are loaded in a new tab for every thread, everything else in the first tab.
+
 Download `URL` with waiting `0.8` seconds and randomly waiting up to `0.4` seconds for each request
 
     forumscraper --wait 0.8 --wait-random 0.4 URL
@@ -93,13 +97,25 @@ Download `URL` ignoring ssl errors with timeout set to `60` seconds and custom u
 
     forumscraper --insecure --timeout 60 --user-agent 'why are we still here?'
 
-`--location` Allow for redirections.
+The browser always follows redirections, `--location` makes it send headers also to the pages it's redirected to.
 
-`--proxy PROXY` Use the specified proxy.
+`--proxy PROXY` Use the specified proxy for all requests, e.g. `http://user:pass@host:port` or `socks5://host:port`.
 
-`--header "Key: Value"` very similar to `curl` `--header` option, can be specified multiple times e.g. `--header 'User: Admin' --header 'Pass: 12345'`. Similar to `curl` `Cookie` header will be parsed like `Cookie: key1=value1; key2=value2` and will be changed to cookies.
+`--header "Key: Value"` very similar to `curl` `--header` option, can be specified multiple times e.g. `--header 'User: Admin' --header 'Pass: 12345'`. Similar to `curl` `Cookie` header will be parsed like `Cookie: key1=value1; key2=value2` and will be changed to cookies. Headers are sent only when loading pages, not with the images, scripts etc. they use.
 
 `--cookie "Key=Value"` very similar to `curl` `--cookie` option, can be specified multiple times e.g. `--cookie 'auth=8f82ab' --cookie 'PHPSESSID=qw3r8an829'`.
+
+`--browser BROWSER` get cookies from specified browser e.g. `firefox`, requires [browser_cookie3](https://github.com/borisbabic/browser_cookie3).
+
+### Browser options
+
+`--browser-path PATH` use browser executable from `PATH`.
+
+`--user-data-dir DIR` use browser profile from `DIR` instead of a new temporary one, e.g. one you're logged in with.
+
+`--no-headless` show browser window.
+
+`--no-sandbox` disable sandbox of the browser, may be needed in containers.
 
 
 ### Settings
@@ -147,7 +163,7 @@ import os
 import sys
 from forumscraper import extractor, outputs, xenforo2
 
-ex = extractor(requests={"timeout": 90})
+ex = extractor(requests={"timeout": 90})  # browser is started by the first request
 
 thread = ex.guess(
     "https://xenforo.com/community/threads/forum-data-breach.180995/",
@@ -251,6 +267,8 @@ for i in failures:  # try to download failed one last time
         scraper.get_thread(x[0], state=files)  # use of already identified class
 
 os.chdir("..")
+
+ex.close()  # stops the browser, scrapers can also be used in a with block that does it
 ```
 
 ### Scrapers
@@ -302,7 +320,8 @@ which take url as argument, optionally already downloaded html either as `str`, 
     ex = forumscraper.Extractor(headers={"Referer":"https://xenforo.com/community/"},timeout=20)
     state = ex.guess('https://xenforo.com/community/threads/selling-and-buying-second-hand-licenses.131205/',timeout=90)
 
-    html = requests.get('https://xenforo.com/community/threads/is-it-possible-to-set-up-three-websites-with-a-second-hand-xenforo-license.222507/').text
+    with open('license-thread.html') as f:
+        html = f.read()
     ex.guess('https://xenforo.com/community/threads/is-it-possible-to-set-up-three-websites-with-a-second-hand-xenforo-license.222507/',html,state,timeout=40)
 ```
 
@@ -406,7 +425,7 @@ Disabling `users` and `reactions` greatly speeds up getting `xenforo` and `invis
 
 `force=False` if set, scraper overwrites files, but will still refuse to scrape urls found in `visited` field of state, if you are passing state between functions and you want to redownload them you will have to set it to empty set e.g. `state['visited'].clear()` after every function call.
 
-`max_workers=1` set number of threads used for scraping.
+`max_workers=1` set number of threads scraped at once, each of them is loaded in its own browser tab.
 
 `compress_func=None` set compression function that will be called when writing to files, function should accept data in `bytes` as the first argument, e.g. `gzip.compress`.
 
@@ -424,21 +443,19 @@ Disabling `users` and `reactions` greatly speeds up getting `xenforo` and `invis
 
 #### requests
 
-`requests` is a dictionary passed to [treerequests](https://github.com/TUVIMEN/treerequests) library, the following are just a few of possible options:
+`requests` is a dictionary of settings for loading pages in the browser:
 
 `verify=True` if set to `False` ignore ssl errors.
 
-`timeout=120` request timeout.
+`timeout=120` time limit for loading a page, including passing anti-bot challenges, `None` disables it.
 
-`allow_redirects=False` allow for redirections.
+`allow_redirects=False` the browser always follows redirections, this setting allows sending `headers` also to pages it's redirected to.
 
-`proxies={}` requests library proxies dictionary.
+`max_redirects=30` maximum number of redirections.
 
-`headers={}` requests library headers dictionary.
+`headers={}` dictionary of headers added to requests for pages.
 
-`cookies={}` requests library cookies dictionary.
-
-`user_agent=None` custom user-agent.
+`cookies={}` dictionary of cookies set for pages before loading them.
 
 `wait=0` waiting time for each request.
 
@@ -447,3 +464,23 @@ Disabling `users` and `reactions` greatly speeds up getting `xenforo` and `invis
 `retry=3` number of retries attempted in case of failure.
 
 `retry_delay=60` waiting time between retries.
+
+`retry_all_errors=False` retry also failures that aren't temporary, e.g. status code 404.
+
+The following are used when the browser is started, i.e. they have to be set at initialization of scrapers:
+
+`proxies={}` dictionary like `{"https": "http://user:pass@host:port"}`, the browser uses one proxy for all requests.
+
+`user_agent=None` custom user-agent.
+
+`browser=None` name of browser to get cookies from, e.g. `"firefox"` (requires [browser_cookie3](https://github.com/borisbabic/browser_cookie3)), or function returning cookie jar.
+
+`headless=True` if set to `False` show browser window.
+
+`browser_executable_path=None` path to browser executable, found automatically by default.
+
+`browser_args=[]` additional command line arguments of the browser.
+
+`user_data_dir=None` browser profile directory, by default a new temporary one is used.
+
+`sandbox=True` if set to `False` disable sandbox of the browser.

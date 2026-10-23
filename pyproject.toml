@@ -7,14 +7,14 @@ name = "forumscraper"
 version = "0.1.21"
 description = "A forum scraper library"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "GPLv3"}
 keywords = ["text-processing", "scraper", "forums", "phpbb", "smf", "xmb", "invision", "xenforo"]
 authors = [
   {name = "Dominik Stanisław Suchora", email = "hexderm@gmail.com" }
 ]
 
-dependencies = ['requests','reliq','treerequests']
+dependencies = ['reliq','zendriver @ git+https://github.com/aliciusschroeder/zendriver.git']
 
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -24,8 +24,6 @@ classifiers = [
   "Operating System :: OS Independent",
 
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",

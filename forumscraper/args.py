@@ -5,8 +5,7 @@ import ast
 import gzip
 import bz2
 import lzma
-
-from treerequests import args_section
+import inspect
 
 from .utils import (
     url_valid,
@@ -117,6 +116,234 @@ def valid_cookie(src):
     return r
 
 
+def valid_time(time):
+    weights = {"s": 1, "m": 60, "h": 3600, "d": 24 * 3600}
+
+    t = time.strip()
+    weight = 1
+    if t[-1:] in weights:
+        weight = weights[t[-1]]
+        t = t[:-1]
+
+    try:
+        num = float(t)
+    except ValueError:
+        num = -1
+    if num < 0:
+        raise argparse.ArgumentTypeError('incorrect time format "{}"'.format(time))
+    return num * weight
+
+
+def valid_timeout(time):
+    if time.strip() == "-":
+        return None
+    return valid_time(time)
+
+
+def valid_browser(name):
+    try:
+        import browser_cookie3
+    except ImportError:
+        raise argparse.ArgumentTypeError(
+            "getting cookies from browser requires browser_cookie3 module"
+        )
+
+    func = getattr(browser_cookie3, name, None)
+    if not inspect.isfunction(func) or func.__module__ != browser_cookie3.__name__:
+        raise argparse.ArgumentTypeError('no such browser "{}"'.format(name))
+    return func
+
+
+def request_settings(args):
+    names = [
+        "wait",
+        "wait_random",
+        "retry",
+        "retry_delay",
+        "retry_all_errors",
+        "timeout",
+        "verify",
+        "allow_redirects",
+        "max_redirects",
+        "user_agent",
+        "browser",
+        "browser_executable_path",
+        "user_data_dir",
+        "headless",
+        "sandbox",
+    ]
+    ret = {i: getattr(args, i) for i in names if hasattr(args, i)}
+
+    headers = {}
+    cookies = {}
+    for i in args.header:
+        for name, value in i.items():
+            if name.lower() != "cookie":
+                headers[name.lower()] = value
+                continue
+            for j in value.split(";"):
+                if (r := conv_curl_cookie_to_requests(j)) is not None:
+                    cookies.update(r)
+    for i in args.cookie:
+        cookies.update(i)
+
+    if len(headers) > 0:
+        ret["headers"] = headers
+    if len(cookies) > 0:
+        ret["cookies"] = cookies
+    if hasattr(args, "proxy"):
+        ret["proxies"] = {"http": args.proxy, "https": args.proxy}
+    return ret
+
+
+def args_section(parser):
+    request = parser.add_argument_group("Request settings")
+    request.add_argument(
+        "-w",
+        "--wait",
+        metavar="TIME",
+        type=valid_time,
+        help="Set waiting time for each request",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-W",
+        "--wait-random",
+        metavar="TIME",
+        type=valid_time,
+        help="Set random waiting time for each request to be from 0 to TIME",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-r",
+        "--retry",
+        metavar="NUM",
+        type=int,
+        help="Set number of retries for failed request to NUM",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "--retry-delay",
+        metavar="TIME",
+        type=valid_time,
+        help="Set interval between each retry",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "--retry-all-errors",
+        action="store_true",
+        help="Retry no matter the error",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-m",
+        "--timeout",
+        metavar="TIME",
+        type=valid_timeout,
+        help="Set time limit for loading a page, if set to '-' timeout is disabled",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-k",
+        "--insecure",
+        dest="verify",
+        action="store_false",
+        help="Ignore ssl errors",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-L",
+        "--location",
+        dest="allow_redirects",
+        action="store_true",
+        help="Send headers also to pages the browser is redirected to (it always follows redirections), can be dangerous if credentials are passed in headers",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "--max-redirs",
+        dest="max_redirects",
+        metavar="NUM",
+        type=int,
+        help="Set the maximum number of redirections to follow",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-A",
+        "--user-agent",
+        metavar="UA",
+        type=str,
+        help="Set custom user agent of the browser",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-x",
+        "--proxy",
+        metavar="PROXY",
+        type=str,
+        help="Use the specified proxy for all requests e.g. http://user:pass@host:port or socks5://host:port",
+        default=argparse.SUPPRESS,
+    )
+    request.add_argument(
+        "-H",
+        "--header",
+        metavar="HEADER",
+        type=valid_header,
+        action="append",
+        help="Set curl style header, can be used multiple times e.g. -H 'User: Admin' -H 'Pass: 12345'",
+        default=[],
+    )
+    request.add_argument(
+        "-b",
+        "--cookie",
+        metavar="COOKIE",
+        type=valid_cookie,
+        action="append",
+        help="Set curl style cookie, can be used multiple times e.g. -b 'auth=8f82ab' -b 'PHPSESSID=qw3r8an829'",
+        default=[],
+    )
+    request.add_argument(
+        "-B",
+        "--browser",
+        metavar="BROWSER",
+        type=valid_browser,
+        help="Get cookies from specified browser e.g. -B firefox",
+        default=argparse.SUPPRESS,
+    )
+
+    browser = parser.add_argument_group("Browser")
+    browser.add_argument(
+        "--browser-path",
+        dest="browser_executable_path",
+        metavar="PATH",
+        type=str,
+        help="Use browser executable from PATH instead of the one found automatically",
+        default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--user-data-dir",
+        metavar="DIR",
+        type=str,
+        help="Use browser profile from DIR, e.g. to be logged in, instead of a new temporary one",
+        default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--no-headless",
+        dest="headless",
+        action="store_false",
+        help="Show browser window",
+        default=argparse.SUPPRESS,
+    )
+    browser.add_argument(
+        "--no-sandbox",
+        dest="sandbox",
+        action="store_false",
+        help="Disable sandbox of the browser, may be needed in containers",
+        default=argparse.SUPPRESS,
+    )
+
+    return request
+
+
 def argparser():
     parser = argparse.ArgumentParser(
         description="Forum scraper that aims to be universal, automatic and extensive.",
@@ -150,7 +377,7 @@ def argparser():
         "--threads",
         metavar="NUM",
         type=int,
-        help="run tasks using NUM of threads",
+        help="download NUM threads at once, each in its own browser tab",
         default=1,
     )
     general.add_argument(

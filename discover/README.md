@@ -32,3 +32,7 @@ Identifies engines from a list of links from file and then finds the root of the
 It creates a lot of files but correct links are stored in files with names ending with `-root-found`.
 
 If you want things to go faster you can edit the declared variables on top of the script, their names are self descriptive.
+
+# fetch
+
+Prints pages from urls passed as arguments, loaded by the same browser that forumscraper uses. `builtwith` downloads pages with it.

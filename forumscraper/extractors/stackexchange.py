@@ -70,8 +70,7 @@ class stackexchange(ForumExtractor):
             n = rq.search(r'div #b>comments-link-; a .comments-link i@b>"Show " | "t"')
             if len(n) > 0:
                 rsettings = copy.copy(settings["requests"])
-                if rsettings.get("headers") is None:
-                    rsettings["headers"] = {}
+                rsettings["headers"] = dict(rsettings.get("headers", {}))
                 rsettings["headers"].update({"x-Requested-With": "XMLHttpRequest"})
 
                 rq = self.session.get_html(

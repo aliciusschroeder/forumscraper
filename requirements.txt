@@ -1,3 +1,2 @@
-requests
 reliq
-treerequests
+zendriver @ git+https://github.com/aliciusschroeder/zendriver.git

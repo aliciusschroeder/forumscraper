@@ -68,8 +68,7 @@ class invision(ForumExtractor):
             )
 
             rsettings = copy.copy(settings["requests"])
-            if rsettings.get("headers") is None:
-                rsettings["headers"] = {}
+            rsettings["headers"] = dict(rsettings.get("headers", {}))
             rsettings["headers"].update({"x-Requested-With": "XMLHttpRequest"})
             rsettings["trim"] = True
 

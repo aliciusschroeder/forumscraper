@@ -1,11 +1,8 @@
 import sys
 
-from treerequests import args_session
-import requests
-
 from .defs import reliq, Outputs, __version__
 from .extractors.extractor import *
-from .args import argparser
+from .args import argparser, request_settings
 
 __all__ = [
     "Outputs",
@@ -70,17 +67,17 @@ def main():
         "pages_max_depth": args.pages_max_depth,
         "pages_threads_max": args.pages_threads_max,
         "compress_func": args.compression,
+        "requests": request_settings(args),
     }
 
     ex = Extractor(**settings)
-    args_session(ex.session, args)
 
     func_name = "guess"
     func = getattr(ex, func_name)
 
     for url in args.urls:
         if isinstance(url, list):
-            ex = url[0](**settings)
+            ex = url[0](ex.session, **settings)  # all of them share the browser
             func_name = url[1]
             func = getattr(ex, func_name)
             continue
@@ -99,6 +96,8 @@ def main():
         elif args.only_urls_threads:
             for i in ret["urls"]["threads"]:
                 print(i, file=args.output)
+
+    ex.close()
 
     for i in [args.log, args.failed, args.output]:
         if i not in [sys.stdout, sys.stderr]:

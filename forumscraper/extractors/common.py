@@ -8,20 +8,18 @@ from concurrent.futures import ThreadPoolExecutor
 from itertools import batched
 import copy
 
-import treerequests
-import requests
-
 from ..utils import strtosha256, get_settings, url_valid
 from ..defs import Outputs, reliq
 from ..exceptions import *
+from ..session import Session
 
 common_exceptions = (
     AttributeError,
     ValueError,
     IndexError,
     KeyError,
-    requests.RequestException,
-    treerequests.AlreadyVisitedError,
+    RequestError,
+    AlreadyVisitedError,
 )
 
 BUNDLE_SIZE = 500
@@ -49,7 +47,7 @@ def write_html(path, rq, settings):
 
 
 def handle_error(self, exception, url, settings, for_pedantic=False):
-    if isinstance(exception, treerequests.AlreadyVisitedError):
+    if isinstance(exception, AlreadyVisitedError):
         return None
 
     undisturbed = settings["undisturbed"]
@@ -67,7 +65,7 @@ def handle_error(self, exception, url, settings, for_pedantic=False):
             print(msg, file=failed)
 
     if not undisturbed and (failed is None or pedantic):
-        if isinstance(exception, requests.RequestException):
+        if isinstance(exception, RequestError):
             raise RequestError(msg)
         raise exception
     return
@@ -94,16 +92,12 @@ def create_logger(dest):
     if dest is None:
         return
 
-    def log(args):
-        if len(args) == 3:
-            val = args[1]
-            if isinstance(dest, list):
-                dest.append(val)
-            else:
-                dest.write(val)
-                dest.write("\n")
+    def log(url):
+        if isinstance(dest, list):
+            dest.append(url)
         else:
-            assert 0
+            dest.write(url)
+            dest.write("\n")
 
     return log
 
@@ -193,7 +187,7 @@ class ItemExtractor:
 
             try:
                 rq = self.session.get_html(nexturl, **rsettings)
-            except treerequests.AlreadyVisitedError:
+            except AlreadyVisitedError:
                 break
 
             write_html(path + "-" + str(page), rq, settings)
@@ -300,18 +294,22 @@ class ForumExtractor:
             session["visited"] = True
             self.session = session
         else:
-            self.session = treerequests.Session(
-                requests,
-                requests.Session,
-                lambda x, y: treerequests.reliq(x, y, obj=reliq),
-                **self.settings["requests"],
-            )
+            self.session = Session(**self.settings["requests"])
 
         self.session["logger"] = create_logger(self.settings["logger"])
 
         self.findroot_expr = None
         self.findroot_board = False
         self.findroot_board_expr = None
+
+    def close(self):
+        self.session.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
     def get_settings(self, settings):
         ret = get_settings(self.settings, **settings)
@@ -370,7 +368,10 @@ class ForumExtractor:
             return self.handle_error(ex, url, settings)
 
     def get_thread(self, url, rq=None, state=None, depth=0, **kwargs):
-        return self._get_item("threads", url, self.thread, rq, state, depth, **kwargs)
+        with self.session.tab():
+            return self._get_item(
+                "threads", url, self.thread, rq, state, depth, **kwargs
+            )
 
     def get_user(self, url, rq=None, state=None, depth=0, **kwargs):
         return self._get_item("users", url, self.user, rq, state, depth, **kwargs)
@@ -456,7 +457,7 @@ class ForumExtractor:
             ):
                 try:
                     self.get_forum(url, None, state, depth + 1, **settings)
-                except (requests.RequestException, treerequests.AlreadyVisitedError):
+                except (RequestError, AlreadyVisitedError):
                     continue
 
     def go_through_pages(
@@ -816,7 +817,7 @@ class ForumExtractorIdentify(ForumExtractor):
             cookies = {}
             if rq is None:
                 rq = r[0]
-                cookies = r[1].cookies.get_dict()
+                cookies = r[1].cookies
             else:
                 rq = r
         except self.common_exceptions as ex:
